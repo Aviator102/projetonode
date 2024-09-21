@@ -2,29 +2,27 @@ const puppeteer = require('puppeteer');
 const axios = require('axios');
 
 // Configurações do Baserow
-const token = 'PUWrEOrsL8THti1rgmnTwPlio0udsZuh';  // Seu token de API
-const table_id = 359943;  // ID da tabela no Baserow
+const token = 'PUWrEOrsL8THti1rgmnTwPlio0udsZuh';
+const table_id = 359943;
 const url_baserow = `https://api.baserow.io/api/database/rows/table/${table_id}/?user_field_names=true`;
 
 // Função para inserir resultado na tabela do Baserow
 async function inserirResultadoBaserow(valor, hora) {
+  const dados_para_inserir = {
+    valor: valor,
+    hora: hora
+  };
+
   try {
-    const response = await axios.post(url_baserow, {
-      valor: valor,
-      hora: hora,
-    }, {
+    const response = await axios.post(url_baserow, dados_para_inserir, {
       headers: {
-        'Authorization': `Token ${token}`,
-        'Content-Type': 'application/json',
-      },
+        Authorization: `Token ${token}`,
+        'Content-Type': 'application/json'
+      }
     });
-    if (response.status === 200) {
-      console.log('Resultado inserido no Baserow com sucesso!');
-    } else {
-      console.log(`Erro ao inserir no Baserow. Código: ${response.status}, Resposta: ${response.data}`);
-    }
+    console.log('Resultado inserido no Baserow com sucesso!');
   } catch (error) {
-    console.error('Erro ao inserir no Baserow:', error);
+    console.error('Erro ao inserir no Baserow:', error.response ? error.response.data : error.message);
   }
 }
 
@@ -33,46 +31,46 @@ async function capturarResultados() {
   const browser = await puppeteer.launch({ headless: true });
   const page = await browser.newPage();
 
-  // Acessa a página de login
   await page.goto('https://m.vaidebet.com/ptb/games/casino/detail/normal/7787');
-  
+
   // Preenche os campos de login
+  await page.waitForSelector('#username');
   await page.type('#username', 'joseAviatorr');
+
+  await page.waitForSelector('#password');
   await page.type('#password', 'Aviator102030!');
 
   // Clica no botão de login
-  await Promise.all([
-    page.click('button.btn.login-btn'),
-    page.waitForNavigation(),
-  ]);
+  await page.click('button.btn.login-btn');
+  await page.waitForTimeout(5000); // Espera o carregamento da página pós-login
 
-  // Acessa o iframe do jogo
-  const iframe = await page.$('iframe');
-  const frame = await iframe.contentFrame();
+  const resultados = [];
 
-  // Captura os resultados da página
-  const resultados = await frame.evaluate(() => {
-    const elementos = Array.from(document.querySelectorAll('.class-para-resultados'));
-    return elementos.map(el => el.innerText.replace('x', ''));
-  });
+  // Loop para capturar e inserir resultados
+  while (true) {
+    // Aguarda o carregamento do iframe
+    await page.waitForSelector('iframe');
 
-  await browser.close();
+    const iframe = await page.frames().find(frame => frame.url().includes('casino-details'));
+    await iframe.waitForSelector('div:nth-child(1)'); // Ajuste o seletor conforme necessário
 
-  return resultados;
-}
+    const novos_resultados = await iframe.evaluate(() => {
+      const resultados = Array.from(document.querySelectorAll('div:nth-child(1)')).map(el => el.innerText);
+      return resultados.filter(r => !r.includes('x')).slice(0, 10); // Ajuste conforme necessário
+    });
 
-// Função para o loop de captura e inserção de resultados no Baserow
-async function loop() {
-  const novosResultados = await capturarResultados();
-
-  if (novosResultados && novosResultados.length > 0) {
-    for (const resultado of novosResultados) {
+    // Insere os novos resultados
+    for (const resultado of novos_resultados) {
       const horaAtual = new Date().toLocaleTimeString('pt-BR');
       console.log(`Resultado: ${resultado} | Hora: ${horaAtual}`);
       await inserirResultadoBaserow(resultado, horaAtual);
     }
+
+    await page.waitForTimeout(10000); // Espera 10 segundos antes de buscar novos resultados
   }
+
+  await browser.close();
 }
 
-// Inicia o loop de captura de resultados
-setInterval(loop, 10000);  // Executa a cada 10 segundos
+// Inicia a captura de resultados
+capturarResultados();
